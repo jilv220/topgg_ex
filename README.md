@@ -2,7 +2,7 @@
 
 [![Hex.pm](https://img.shields.io/hexpm/v/topgg_ex.svg)](https://hex.pm/packages/topgg_ex)
 [![Documentation](https://img.shields.io/badge/docs-hexdocs-blue.svg)](https://hexdocs.pm/topgg_ex/)
-[![License](https://img.shields.io/hexpm/l/topgg_ex.svg)](https://github.com/yourusername/topgg_ex/blob/main/LICENSE)
+[![License](https://img.shields.io/hexpm/l/topgg_ex.svg)](https://github.com/jilv220/topgg_ex/blob/main/LICENSE)
 
 A community Elixir SDK for the [Top.gg](https://top.gg) API, allowing you to interact with Discord bot statistics, user votes, and bot information.
 
@@ -268,7 +268,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Top.gg API Documentation](https://docs.top.gg)
 - [Hex Package](https://hex.pm/packages/topgg_ex)
 - [Documentation](https://hexdocs.pm/topgg_ex/)
-- [GitHub Repository](https://github.com/yourusername/topgg_ex)
+- [GitHub Repository](https://github.com/jilv220/topgg_ex)
 
 ## Acknowledgments
 

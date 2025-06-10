@@ -2,7 +2,7 @@ defmodule TopggEx.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/yourusername/topgg_ex"
+  @source_url "https://github.com/jilv220/topgg_ex"
 
   def project do
     [
@@ -70,7 +70,7 @@ defmodule TopggEx.MixProject do
       main: "TopggEx.Api",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md"],
+      extras: ["README.md", "LICENSE"],
       groups_for_modules: [
         "Core API": [TopggEx.Api],
         "HTTP Client": [TopggEx.HttpClient, TopggEx.HttpClientBehaviour]
