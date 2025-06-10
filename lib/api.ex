@@ -9,7 +9,7 @@ defmodule TopggEx.Api do
 
       iex> {:ok, api} = TopggEx.Api.new("your_topgg_token_here")
       iex> {:ok, _stats} = TopggEx.Api.post_stats(api, %{server_count: 100})
-      {:ok, %{server_count: 100, shard_count: nil, shards: []}}
+      {:ok, %{server_count: 100}}
 
   ## Configuration
 
@@ -34,10 +34,17 @@ defmodule TopggEx.Api do
           optional(:base_url) => String.t()
         }
 
-  @type bot_stats :: %{
-          server_count: non_neg_integer(),
-          shard_count: non_neg_integer() | nil,
-          shards: [non_neg_integer()]
+  @type post_stats_body :: %{
+          required(:server_count) => non_neg_integer() | [non_neg_integer()],
+          optional(:shard_count) => non_neg_integer(),
+          optional(:shards) => [non_neg_integer()],
+          optional(:shard_id) => non_neg_integer()
+        }
+
+  @type bot_stats_response :: %{
+          optional(:server_count) => non_neg_integer(),
+          required(:shards) => [non_neg_integer()],
+          optional(:shard_count) => non_neg_integer()
         }
 
   @type bot_info :: map()
@@ -119,14 +126,32 @@ defmodule TopggEx.Api do
 
   ## Examples
 
+      # Posting server count as an integer
       iex> {:ok, stats} = TopggEx.Api.post_stats(api, %{server_count: 28199})
-      {:ok, %{server_count: 28199, shard_count: nil, shards: []}}
+      {:ok, %{server_count: 28199}}
+
+      # Posting with shards (server_count as array)
+      iex> {:ok, stats} = TopggEx.Api.post_stats(api, %{server_count: [1000, 2000, 3000]})
+      {:ok, %{server_count: [1000, 2000, 3000]}}
+
+      # Posting with additional shard information
+      iex> {:ok, stats} = TopggEx.Api.post_stats(api, %{
+      ...>   server_count: 500,
+      ...>   shard_id: 0,
+      ...>   shard_count: 5
+      ...> })
+      {:ok, %{server_count: 500, shard_id: 0, shard_count: 5}}
 
   """
-  @spec post_stats(t(), bot_stats()) :: {:ok, bot_stats()} | {:error, any()}
+  @spec post_stats(t(), post_stats_body()) :: {:ok, post_stats_body()} | {:error, any()}
   def post_stats(%__MODULE__{} = api, %{server_count: server_count} = stats)
-      when is_integer(server_count) and server_count > 0 do
-    body = %{server_count: server_count}
+      when (is_integer(server_count) and server_count > 0) or
+             (is_list(server_count) and length(server_count) > 0) do
+    body =
+      %{server_count: server_count}
+      |> maybe_add_field(stats, :shard_count)
+      |> maybe_add_field(stats, :shards)
+      |> maybe_add_field(stats, :shard_id)
 
     case http_request(api, :post, "/bots/stats", body) do
       {:ok, _response} -> {:ok, stats}
@@ -150,18 +175,17 @@ defmodule TopggEx.Api do
   ## Examples
 
       iex> {:ok, stats} = TopggEx.Api.get_stats(api)
-      {:ok, %{server_count: 28199, shard_count: nil, shards: []}}
+      {:ok, %{server_count: 28199, shard_count: 5, shards: [5000, 5000, 5000, 5000, 8199]}}
 
   """
-  @spec get_stats(t()) :: {:ok, bot_stats()} | {:error, any()}
+  @spec get_stats(t()) :: {:ok, bot_stats_response()} | {:error, any()}
   def get_stats(%__MODULE__{} = api) do
     case http_request(api, :get, "/bots/stats") do
-      {:ok, %{"server_count" => server_count} = response} ->
-        stats = %{
-          server_count: server_count,
-          shard_count: Map.get(response, "shard_count"),
-          shards: Map.get(response, "shards", [])
-        }
+      {:ok, response} ->
+        stats =
+          %{shards: Map.get(response, "shards", [])}
+          |> maybe_add_response_field(response, "server_count", :server_count)
+          |> maybe_add_response_field(response, "shard_count", :shard_count)
 
         {:ok, stats}
 
@@ -394,4 +418,20 @@ defmodule TopggEx.Api do
   end
 
   defp process_search(query), do: query
+
+  @spec maybe_add_field(map(), map(), atom()) :: map()
+  defp maybe_add_field(body, stats, field) do
+    case Map.get(stats, field) do
+      nil -> body
+      value -> Map.put(body, field, value)
+    end
+  end
+
+  @spec maybe_add_response_field(map(), map(), String.t(), atom()) :: map()
+  defp maybe_add_response_field(stats, response, response_key, stats_key) do
+    case Map.get(response, response_key) do
+      nil -> stats
+      value -> Map.put(stats, stats_key, value)
+    end
+  end
 end

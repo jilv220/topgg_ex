@@ -94,6 +94,50 @@ defmodule TopggEx.ApiTest do
 
       assert {:error, %{status: 500}} = Api.post_stats(api, stats)
     end
+
+    test "posts bot statistics with server_count array successfully", %{bypass: bypass, api: api} do
+      stats = %{server_count: [1000, 2000, 3000]}
+
+      Bypass.expect_once(bypass, "POST", "/api/bots/stats", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(body) == %{"server_count" => [1000, 2000, 3000]}
+
+        conn |> Plug.Conn.resp(200, "{}")
+      end)
+
+      assert {:ok, ^stats} = Api.post_stats(api, stats)
+    end
+
+    test "posts bot statistics with optional shard fields", %{bypass: bypass, api: api} do
+      stats = %{
+        server_count: 500,
+        shard_id: 0,
+        shard_count: 5,
+        shards: [100, 100, 100, 100, 100]
+      }
+
+      Bypass.expect_once(bypass, "POST", "/api/bots/stats", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        expected_body = %{
+          "server_count" => 500,
+          "shard_id" => 0,
+          "shard_count" => 5,
+          "shards" => [100, 100, 100, 100, 100]
+        }
+
+        assert Jason.decode!(body) == expected_body
+
+        conn |> Plug.Conn.resp(200, "{}")
+      end)
+
+      assert {:ok, ^stats} = Api.post_stats(api, stats)
+    end
+
+    test "returns error for empty server_count array", %{api: api} do
+      assert {:error, "Missing or invalid server count"} =
+               Api.post_stats(api, %{server_count: []})
+    end
   end
 
   describe "get_stats/1" do
@@ -114,8 +158,12 @@ defmodule TopggEx.ApiTest do
       assert stats.shards == [500, 500]
     end
 
-    test "handles missing optional fields", %{bypass: bypass, api: api} do
-      response = %{"server_count" => 1000}
+    test "gets bot statistics with all optional fields", %{bypass: bypass, api: api} do
+      response = %{
+        "server_count" => 1000,
+        "shard_count" => 5,
+        "shards" => [200, 200, 200, 200, 200]
+      }
 
       Bypass.expect_once(bypass, "GET", "/api/bots/stats", fn conn ->
         conn |> Plug.Conn.resp(200, Jason.encode!(response))
@@ -123,8 +171,23 @@ defmodule TopggEx.ApiTest do
 
       assert {:ok, stats} = Api.get_stats(api)
       assert stats.server_count == 1000
-      assert stats.shard_count == nil
+      assert stats.shard_count == 5
+      assert stats.shards == [200, 200, 200, 200, 200]
+    end
+
+    test "handles missing optional fields", %{bypass: bypass, api: api} do
+      response = %{}
+
+      Bypass.expect_once(bypass, "GET", "/api/bots/stats", fn conn ->
+        conn |> Plug.Conn.resp(200, Jason.encode!(response))
+      end)
+
+      assert {:ok, stats} = Api.get_stats(api)
+      # shards is always present (can be empty)
       assert stats.shards == []
+      # server_count and shard_count are optional
+      assert not Map.has_key?(stats, :server_count)
+      assert not Map.has_key?(stats, :shard_count)
     end
   end
 
