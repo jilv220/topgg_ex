@@ -112,7 +112,43 @@ children = [
 
 ### Webhook Handling
 
-TopggEx includes a built-in webhook handler for receiving vote notifications from Top.gg:
+TopggEx includes a built-in webhook handler for receiving vote notifications from Top.gg.
+
+#### Using the Functional Listener (Recommended)
+
+The easiest way to handle webhooks is using the `listener` function:
+
+```elixir
+# In your Phoenix router
+defmodule MyAppWeb.Router do
+  use MyAppWeb, :router
+
+  # Create the webhook handler
+  webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
+    case payload do
+      %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+        # Handle the vote
+        MyApp.handle_user_vote(user_id, bot_id)
+        IO.puts("User #{user_id} voted for bot #{bot_id}!")
+
+      %{"user" => user_id, "type" => "test"} ->
+        # Handle test webhook
+        IO.puts("Test webhook from user: #{user_id}")
+    end
+
+    # Response is handled automatically by the listener
+  end, authorization: "your_webhook_auth_token")
+
+  scope "/webhooks" do
+    pipe_through :api
+    post "/topgg", webhook_handler
+  end
+end
+```
+
+#### Using as Plug Middleware (Alternative)
+
+You can also use the webhook handler as Plug middleware:
 
 ```elixir
 # In your Phoenix router
@@ -150,43 +186,65 @@ defmodule MyAppWeb.WebhookController do
 end
 ```
 
-#### Functional Webhook API
+#### Manual Webhook Processing
 
-For more control, you can use the functional API:
+For maximum control, you can use the functional API to manually parse webhooks:
 
 ```elixir
 def handle_webhook(conn) do
   case TopggEx.Webhook.verify_and_parse(conn, "your_auth_token") do
     {:ok, payload} ->
-      process_vote(payload)
-      send_resp(conn, 204, "")
+      case payload do
+        %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+          MyApp.process_vote(user_id, bot_id)
+          send_resp(conn, 204, "")
+
+        %{"user" => user_id, "type" => "test"} ->
+          IO.puts("Test webhook from user: #{user_id}")
+          send_resp(conn, 204, "")
+
+
+      end
 
     {:error, :unauthorized} ->
       send_resp(conn, 403, Jason.encode!(%{error: "Unauthorized"}))
 
     {:error, :invalid_body} ->
       send_resp(conn, 400, Jason.encode!(%{error: "Invalid body"}))
+
+    {:error, reason} ->
+      send_resp(conn, 400, Jason.encode!(%{error: "Webhook error: #{inspect(reason)}"}))
   end
 end
 ```
 
-#### Webhook Listener
+#### Advanced Listener Usage
 
-You can also create custom webhook handlers:
+You can create more sophisticated webhook handlers with error handling and custom logic:
 
 ```elixir
 webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
-  %{"user" => user_id, "type" => vote_type} = payload
+  %{"user" => user_id, "type" => vote_type, "bot" => bot_id} = payload
 
   case vote_type do
     "upvote" ->
-      MyApp.record_vote(user_id)
+      # Record the vote and handle weekend multiplier
+      is_weekend = Map.get(payload, "isWeekend", false)
+      vote_count = if is_weekend, do: 2, else: 1
+
+      MyApp.record_vote(user_id, bot_id, vote_count)
       MyApp.send_thank_you(user_id)
+
+      IO.puts("User #{user_id} voted! (#{vote_count} votes)")
+
     "test" ->
-      IO.puts("Test webhook received!")
+      IO.puts("Test webhook received from user #{user_id}!")
+
+
   end
 
-  send_resp(conn, 204, "")
+  # Response is handled automatically by the listener
+  # No need to call send_resp/3
 end, authorization: "your_webhook_auth_token")
 
 # Use in router

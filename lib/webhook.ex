@@ -7,10 +7,39 @@ defmodule TopggEx.Webhook do
 
   ## Examples
 
-      # In your Phoenix router or Plug router:
+  ### Using the Functional Listener (Recommended)
+
+      # In your Phoenix router:
       defmodule MyAppWeb.Router do
         use MyAppWeb, :router
-        import TopggEx.Webhook
+
+        # Create the webhook handler
+        webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
+          case payload do
+            %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+              # Handle the vote
+              MyApp.handle_user_vote(user_id, bot_id)
+              IO.puts("User \#{user_id} voted for bot \#{bot_id}!")
+
+            %{"user" => user_id, "type" => "test"} ->
+              # Handle test webhook
+              IO.puts("Test webhook from user \#{user_id}")
+          end
+
+          # Response is handled automatically by the listener
+        end, authorization: "your_webhook_auth_token")
+
+        scope "/webhooks" do
+          pipe_through :api
+          post "/topgg", webhook_handler
+        end
+      end
+
+  ### Using as Plug Middleware (Alternative)
+
+      # In your Phoenix router:
+      defmodule MyAppWeb.Router do
+        use MyAppWeb, :router
 
         pipeline :webhook do
           plug :accepts, ["json"]
@@ -27,7 +56,7 @@ defmodule TopggEx.Webhook do
       defmodule YourController do
         use MyAppWeb, :controller
 
-                def handle_vote(conn, _params) do
+        def handle_vote(conn, _params) do
           case conn.assigns.topgg_payload do
             %{"user" => user_id, "type" => "upvote"} ->
               # Handle the vote
@@ -168,13 +197,22 @@ defmodule TopggEx.Webhook do
 
   ## Examples
 
-             case TopggEx.Webhook.verify_and_parse(conn, "my_auth_token") do
-         {:ok, payload} ->
-           IO.puts("Received vote from user: \#{payload["user"]}")
+      case TopggEx.Webhook.verify_and_parse(conn, "my_auth_token") do
+        {:ok, payload} ->
+          case payload do
+            %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+              IO.puts("Received vote from user: \#{user_id} for bot: \#{bot_id}")
+              send_resp(conn, 204, "")
 
-         {:error, reason} ->
-           IO.puts("Webhook error: \#{inspect(reason)}")
-       end
+            %{"user" => user_id, "type" => "test"} ->
+              IO.puts("Test webhook from user: \#{user_id}")
+              send_resp(conn, 204, "")
+          end
+
+        {:error, reason} ->
+          IO.puts("Webhook error: \#{inspect(reason)}")
+          send_resp(conn, 400, "Error")
+      end
 
   """
   @spec verify_and_parse(Plug.Conn.t(), String.t() | nil) ::
@@ -206,10 +244,18 @@ defmodule TopggEx.Webhook do
 
   ## Examples
 
-             webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
-         IO.puts("User \#{payload["user"]} voted!")
-         send_resp(conn, 204, "")
-       end, authorization: "my_auth_token")
+      webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
+        case payload do
+          %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+            MyApp.handle_user_vote(user_id, bot_id)
+            IO.puts("User \#{user_id} voted for bot \#{bot_id}!")
+
+          %{"user" => user_id, "type" => "test"} ->
+            IO.puts("Test webhook from user \#{user_id}")
+        end
+
+        # Response is handled automatically
+      end, authorization: "my_auth_token")
 
       # Use in a router
       post "/webhook", webhook_handler
