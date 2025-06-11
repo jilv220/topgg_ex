@@ -85,8 +85,7 @@ defmodule TopggEx.Webhook do
   @behaviour Plug
 
   @type webhook_payload :: %{
-          required(String.t()) => any(),
-          optional(String.t()) => any()
+          String.t() => String.t() | boolean() | map()
         }
 
   @type webhook_options :: [
@@ -130,6 +129,21 @@ defmodule TopggEx.Webhook do
           conn
           |> send_error_response(422, "Malformed request")
           |> halt()
+
+        {:error, :invalid_payload_format} ->
+          conn
+          |> send_error_response(400, "Invalid payload format")
+          |> halt()
+
+        {:error, {:missing_fields, fields}} ->
+          conn
+          |> send_error_response(400, "Missing required fields: #{Enum.join(fields, ", ")}")
+          |> halt()
+
+        {:error, {:invalid_field_type, field}} ->
+          conn
+          |> send_error_response(400, "Invalid type for field: #{field}")
+          |> halt()
       end
     end
   end
@@ -144,10 +158,13 @@ defmodule TopggEx.Webhook do
 
   ## Returns
 
-    * `{:ok, payload}` - Successfully parsed webhook payload
+    * `{:ok, payload}` - Successfully parsed and validated webhook payload
     * `{:error, :unauthorized}` - Authorization header doesn't match
     * `{:error, :invalid_body}` - Request body is not valid JSON
     * `{:error, :malformed_request}` - Error reading request body
+    * `{:error, :invalid_payload_format}` - Payload is not a map
+    * `{:error, {:missing_fields, fields}}` - Required fields are missing
+    * `{:error, {:invalid_field_type, field}}` - Field has incorrect type
 
   ## Examples
 
@@ -161,12 +178,16 @@ defmodule TopggEx.Webhook do
 
   """
   @spec verify_and_parse(Plug.Conn.t(), String.t() | nil) ::
-          {:ok, webhook_payload()} | {:error, atom()}
+          {:ok, webhook_payload()}
+          | {:error, :unauthorized | :invalid_body | :malformed_request | :invalid_payload_format}
+          | {:error, {:missing_fields, [String.t()]}}
+          | {:error, {:invalid_field_type, String.t()}}
   def verify_and_parse(conn, expected_auth \\ nil) do
     with :ok <- verify_authorization(conn, expected_auth),
          {:ok, body} <- read_request_body(conn),
-         {:ok, payload} <- parse_body(body) do
-      formatted_payload = format_incoming(payload)
+         {:ok, payload} <- parse_body(body),
+         {:ok, validated_payload} <- validate_payload(payload) do
+      formatted_payload = format_incoming(validated_payload)
       {:ok, formatted_payload}
     end
   end
@@ -224,6 +245,15 @@ defmodule TopggEx.Webhook do
 
         {:error, :malformed_request} ->
           send_error_response(conn, 422, "Malformed request")
+
+        {:error, :invalid_payload_format} ->
+          send_error_response(conn, 400, "Invalid payload format")
+
+        {:error, {:missing_fields, fields}} ->
+          send_error_response(conn, 400, "Missing required fields: #{Enum.join(fields, ", ")}")
+
+        {:error, {:invalid_field_type, field}} ->
+          send_error_response(conn, 400, "Invalid type for field: #{field}")
       end
     end
   end
@@ -251,6 +281,75 @@ defmodule TopggEx.Webhook do
     case Jason.decode(body) do
       {:ok, payload} -> {:ok, payload}
       {:error, _reason} -> {:error, :invalid_body}
+    end
+  end
+
+  defp validate_payload(payload) when is_map(payload) do
+    required_fields = ["bot", "user", "type"]
+
+    with :ok <- validate_required_fields(payload, required_fields),
+         :ok <- validate_field_types(payload) do
+      {:ok, payload}
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_payload(_payload), do: {:error, :invalid_payload_format}
+
+  defp validate_required_fields(payload, required_fields) do
+    missing_fields =
+      required_fields
+      |> Enum.reject(&Map.has_key?(payload, &1))
+
+    case missing_fields do
+      [] -> :ok
+      missing -> {:error, {:missing_fields, missing}}
+    end
+  end
+
+  defp validate_field_types(payload) do
+    validations = [
+      {"bot", &is_binary/1},
+      {"user", &is_binary/1},
+      {"type", &is_binary/1},
+      {"isWeekend", &is_boolean/1, :optional},
+      {"query", &(is_binary(&1) or is_map(&1)), :optional}
+    ]
+
+    case validate_types(payload, validations) do
+      :ok -> :ok
+      {:error, field} -> {:error, {:invalid_field_type, field}}
+    end
+  end
+
+  defp validate_types(_payload, []), do: :ok
+
+  defp validate_types(payload, [{field, validator} | rest]) do
+    case Map.get(payload, field) do
+      nil ->
+        {:error, field}
+
+      value ->
+        if validator.(value) do
+          validate_types(payload, rest)
+        else
+          {:error, field}
+        end
+    end
+  end
+
+  defp validate_types(payload, [{field, validator, :optional} | rest]) do
+    case Map.get(payload, field) do
+      nil ->
+        validate_types(payload, rest)
+
+      value ->
+        if validator.(value) do
+          validate_types(payload, rest)
+        else
+          {:error, field}
+        end
     end
   end
 
