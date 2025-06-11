@@ -1,7 +1,7 @@
 defmodule TopggEx.MixProject do
   use Mix.Project
 
-  @version "0.1.1"
+  @version "0.1.2"
   @source_url "https://github.com/jilv220/topgg_ex"
 
   def project do
@@ -38,6 +38,7 @@ defmodule TopggEx.MixProject do
     [
       {:jason, "~> 1.4"},
       {:finch, "~> 0.19"},
+      {:plug, "~> 1.16"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test},
       {:bypass, "~> 2.1", only: :test}

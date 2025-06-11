@@ -9,6 +9,7 @@ A community Elixir SDK for the [Top.gg](https://top.gg) API, allowing you to int
 ## Features
 
 - 🚀 **Complete API Coverage**: All Top.gg API endpoints supported
+- 🎯 **Webhook Support**: Built-in webhook handler for vote notifications
 - 🔒 **Type Safety**: Full typespecs and structured data
 - ⚡ **HTTP/2 Support**: Built on Finch for modern HTTP performance
 - 🧪 **Well Tested**: Comprehensive test suite with 95%+ coverage
@@ -109,6 +110,89 @@ children = [
 # => true or false
 ```
 
+### Webhook Handling
+
+TopggEx includes a built-in webhook handler for receiving vote notifications from Top.gg:
+
+```elixir
+# In your Phoenix router
+defmodule MyAppWeb.Router do
+  use MyAppWeb, :router
+
+  pipeline :webhook do
+    plug :accepts, ["json"]
+    plug TopggEx.Webhook, authorization: "your_webhook_auth_token"
+  end
+
+  scope "/webhooks" do
+    pipe_through :webhook
+    post "/topgg", MyAppWeb.WebhookController, :handle_vote
+  end
+end
+
+# In your controller
+defmodule MyAppWeb.WebhookController do
+  use MyAppWeb, :controller
+
+  def handle_vote(conn, _params) do
+    case conn.assigns.topgg_payload do
+      %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+        # Handle the vote
+        MyApp.handle_user_vote(user_id, bot_id)
+        send_resp(conn, 204, "")
+
+      %{"user" => user_id, "type" => "test"} ->
+        # Handle test webhook
+        IO.puts("Test webhook from user: #{user_id}")
+        send_resp(conn, 204, "")
+    end
+  end
+end
+```
+
+#### Functional Webhook API
+
+For more control, you can use the functional API:
+
+```elixir
+def handle_webhook(conn) do
+  case TopggEx.Webhook.verify_and_parse(conn, "your_auth_token") do
+    {:ok, payload} ->
+      process_vote(payload)
+      send_resp(conn, 204, "")
+
+    {:error, :unauthorized} ->
+      send_resp(conn, 403, Jason.encode!(%{error: "Unauthorized"}))
+
+    {:error, :invalid_body} ->
+      send_resp(conn, 400, Jason.encode!(%{error: "Invalid body"}))
+  end
+end
+```
+
+#### Webhook Listener
+
+You can also create custom webhook handlers:
+
+```elixir
+webhook_handler = TopggEx.Webhook.listener(fn payload, conn ->
+  %{"user" => user_id, "type" => vote_type} = payload
+
+  case vote_type do
+    "upvote" ->
+      MyApp.record_vote(user_id)
+      MyApp.send_thank_you(user_id)
+    "test" ->
+      IO.puts("Test webhook received!")
+  end
+
+  send_resp(conn, 204, "")
+end, authorization: "your_webhook_auth_token")
+
+# Use in router
+post "/webhook", webhook_handler
+```
+
 ### Advanced Usage
 
 ```elixir
@@ -134,6 +218,8 @@ children = [
 
 ### Core Functions
 
+#### API Client (`TopggEx.Api`)
+
 | Function       | Description              | Parameters         |
 | -------------- | ------------------------ | ------------------ |
 | `new/2`        | Create API client        | `token`, `options` |
@@ -144,6 +230,14 @@ children = [
 | `get_votes/2`  | Get recent voters        | `api`, `page`      |
 | `has_voted/2`  | Check user vote status   | `api`, `user_id`   |
 | `is_weekend/1` | Check weekend multiplier | `api`              |
+
+#### Webhook Handler (`TopggEx.Webhook`)
+
+| Function             | Description                    | Parameters              |
+| -------------------- | ------------------------------ | ----------------------- |
+| `verify_and_parse/2` | Parse webhook payload          | `conn`, `auth_token`    |
+| `listener/2`         | Create functional handler      | `handler_fun`, `opts`   |
+| Plug behavior        | Use as Phoenix/Plug middleware | `authorization`, `opts` |
 
 ### Error Handling
 
