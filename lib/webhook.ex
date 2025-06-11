@@ -9,7 +9,7 @@ defmodule TopggEx.Webhook do
 
   ### Using the Functional Listener (Recommended)
 
-      # In your Phoenix router:
+      # In a Phoenix router:
       defmodule MyAppWeb.Router do
         use MyAppWeb, :router
 
@@ -32,6 +32,55 @@ defmodule TopggEx.Webhook do
         scope "/webhooks" do
           pipe_through :api
           post "/topgg", webhook_handler
+        end
+      end
+
+      # In a standalone Plug application:
+      defmodule MyApp.Router do
+        use Plug.Router
+
+        plug :match
+        plug :dispatch
+
+        # Option 1: Use the convenient handle_webhook function (Recommended)
+        post "/webhook" do
+          TopggEx.Webhook.handle_webhook(conn, "your_webhook_auth_token", fn payload ->
+            case payload do
+              %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+                MyApp.handle_user_vote(user_id, bot_id)
+                IO.puts("User \#{user_id} voted for bot \#{bot_id}!")
+
+              %{"user" => user_id, "type" => "test"} ->
+                IO.puts("Test webhook from user \#{user_id}")
+            end
+          end)
+        end
+
+        # Option 2: Define a helper function for reusability
+        defp handle_webhook(conn) do
+          case TopggEx.Webhook.verify_and_parse(conn, "your_webhook_auth_token") do
+            {:ok, payload} ->
+              case payload do
+                %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+                  MyApp.handle_user_vote(user_id, bot_id)
+                  IO.puts("User \#{user_id} voted for bot \#{bot_id}!")
+
+                %{"user" => user_id, "type" => "test"} ->
+                  IO.puts("Test webhook from user \#{user_id}")
+              end
+              send_resp(conn, 204, "")
+
+            {:error, reason} ->
+              send_resp(conn, 400, "Error: \#{inspect(reason)}")
+          end
+        end
+
+        post "/webhook-custom" do
+          handle_webhook(conn)
+        end
+
+        match _ do
+          send_resp(conn, 404, "Not found")
         end
       end
 
@@ -231,6 +280,73 @@ defmodule TopggEx.Webhook do
   end
 
   @doc """
+  Handles a webhook request in standalone Plug applications.
+
+  This is a convenience function for standalone Plug applications that want
+  a simple way to handle webhook requests without defining their own helper functions.
+
+  ## Parameters
+
+    * `conn` - The Plug connection
+    * `auth_token` - The expected authorization token (optional)
+    * `handler_fun` - Function that takes the payload as argument
+
+  ## Returns
+
+  The connection with appropriate response sent.
+
+  ## Examples
+
+      # In standalone Plug router
+      post "/webhook" do
+        TopggEx.Webhook.handle_webhook(conn, "my_auth_token", fn payload ->
+          case payload do
+            %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+              MyApp.handle_user_vote(user_id, bot_id)
+              IO.puts("User \#{user_id} voted for bot \#{bot_id}!")
+
+            %{"user" => user_id, "type" => "test"} ->
+              IO.puts("Test webhook from user \#{user_id}")
+          end
+        end)
+      end
+
+  """
+  @spec handle_webhook(Plug.Conn.t(), String.t() | nil, (webhook_payload() -> any())) ::
+          Plug.Conn.t()
+  def handle_webhook(conn, auth_token \\ nil, handler_fun) when is_function(handler_fun, 1) do
+    case verify_and_parse(conn, auth_token) do
+      {:ok, payload} ->
+        try do
+          handler_fun.(payload)
+          send_default_response(conn)
+        rescue
+          error ->
+            Logger.error("TopggEx.Webhook.handle_webhook error: #{inspect(error)}")
+            send_error_response(conn, 500, "Internal server error")
+        end
+
+      {:error, :unauthorized} ->
+        send_error_response(conn, 403, "Unauthorized")
+
+      {:error, :invalid_body} ->
+        send_error_response(conn, 400, "Invalid body")
+
+      {:error, :malformed_request} ->
+        send_error_response(conn, 422, "Malformed request")
+
+      {:error, :invalid_payload_format} ->
+        send_error_response(conn, 400, "Invalid payload format")
+
+      {:error, {:missing_fields, fields}} ->
+        send_error_response(conn, 400, "Missing required fields: #{Enum.join(fields, ", ")}")
+
+      {:error, {:invalid_field_type, field}} ->
+        send_error_response(conn, 400, "Invalid type for field: #{field}")
+    end
+  end
+
+  @doc """
   Creates a functional webhook handler that can be used in controllers or other contexts.
 
   ## Parameters
@@ -257,8 +373,34 @@ defmodule TopggEx.Webhook do
         # Response is handled automatically
       end, authorization: "my_auth_token")
 
-      # Use in a router
+      # Use in Phoenix router
       post "/webhook", webhook_handler
+
+      # Use in standalone Plug router with helper function
+      defp handle_webhook(conn) do
+        case TopggEx.Webhook.verify_and_parse(conn, "my_auth_token") do
+          {:ok, payload} ->
+            # Handle payload...
+            send_resp(conn, 204, "")
+          {:error, reason} ->
+            send_resp(conn, 400, "Error")
+        end
+      end
+
+      post "/webhook" do
+        handle_webhook(conn)
+      end
+
+      # Or use verify_and_parse directly inline
+      post "/webhook" do
+        case TopggEx.Webhook.verify_and_parse(conn, "my_auth_token") do
+          {:ok, payload} ->
+            # Handle payload...
+            send_resp(conn, 204, "")
+          {:error, reason} ->
+            send_resp(conn, 400, "Error")
+        end
+      end
 
   """
   @spec listener((webhook_payload(), Plug.Conn.t() -> Plug.Conn.t()), webhook_options()) ::

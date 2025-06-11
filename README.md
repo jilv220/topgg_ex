@@ -146,6 +146,60 @@ defmodule MyAppWeb.Router do
 end
 ```
 
+**For standalone Plug applications:**
+
+```elixir
+# Define your router module
+defmodule MyApp.Router do
+  use Plug.Router
+
+  plug :match
+  plug :dispatch
+
+  # Option 1: Use the convenient handle_webhook function (Recommended)
+  post "/webhook" do
+    TopggEx.Webhook.handle_webhook(conn, "your_webhook_auth_token", fn payload ->
+      case payload do
+        %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+          # Handle the vote
+          MyApp.handle_user_vote(user_id, bot_id)
+          IO.puts("User #{user_id} voted for bot #{bot_id}!")
+
+        %{"user" => user_id, "type" => "test"} ->
+          # Handle test webhook
+          IO.puts("Test webhook from user: #{user_id}")
+      end
+    end)
+  end
+
+  # Option 2: Use verify_and_parse directly (more explicit)
+  post "/webhook-direct" do
+    case TopggEx.Webhook.verify_and_parse(conn, "your_webhook_auth_token") do
+      {:ok, payload} ->
+        case payload do
+          %{"user" => user_id, "type" => "upvote", "bot" => bot_id} ->
+            MyApp.handle_user_vote(user_id, bot_id)
+            IO.puts("User #{user_id} voted for bot #{bot_id}!")
+
+          %{"user" => user_id, "type" => "test"} ->
+            IO.puts("Test webhook from user: #{user_id}")
+        end
+        send_resp(conn, 204, "")
+
+      {:error, reason} ->
+        send_resp(conn, 400, "Webhook error: #{inspect(reason)}")
+    end
+  end
+
+  match _ do
+    send_resp(conn, 404, "Not found")
+  end
+end
+
+# Start your application
+{:ok, _} = Plug.Cowboy.http(MyApp.Router, [])
+```
+
 #### Using as Plug Middleware (Alternative)
 
 You can also use the webhook handler as Plug middleware:
