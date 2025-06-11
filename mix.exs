@@ -1,7 +1,7 @@
 defmodule TopggEx.MixProject do
   use Mix.Project
 
-  @version "0.1.2"
+  @version "0.1.3"
   @source_url "https://github.com/jilv220/topgg_ex"
 
   def project do

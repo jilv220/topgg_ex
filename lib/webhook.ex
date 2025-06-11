@@ -108,27 +108,29 @@ defmodule TopggEx.Webhook do
 
   @impl Plug
   def call(conn, %__MODULE__{} = options) do
-    case verify_and_parse(conn, options.authorization) do
-      {:ok, payload} ->
-        assign(conn, options.assign_key, payload)
+    # Skip processing if response has already been sent
+    if response_sent?(conn) do
+      conn
+    else
+      case verify_and_parse(conn, options.authorization) do
+        {:ok, payload} ->
+          assign(conn, options.assign_key, payload)
 
-      {:error, :unauthorized} ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(403, Jason.encode!(%{error: "Unauthorized"}))
-        |> halt()
+        {:error, :unauthorized} ->
+          conn
+          |> send_error_response(403, "Unauthorized")
+          |> halt()
 
-      {:error, :invalid_body} ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{error: "Invalid body"}))
-        |> halt()
+        {:error, :invalid_body} ->
+          conn
+          |> send_error_response(400, "Invalid body")
+          |> halt()
 
-      {:error, :malformed_request} ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(422, Jason.encode!(%{error: "Malformed request"}))
-        |> halt()
+        {:error, :malformed_request} ->
+          conn
+          |> send_error_response(422, "Malformed request")
+          |> halt()
+      end
     end
   end
 
@@ -204,31 +206,24 @@ defmodule TopggEx.Webhook do
           try do
             conn = handler_fun.(payload, conn)
 
-            if conn.state == :unset do
-              send_resp(conn, 204, "")
-            else
-              conn
-            end
+            # Send default response safely
+            send_default_response(conn)
           rescue
             error ->
               handle_error(error_handler, error)
-              send_resp(conn, 500, Jason.encode!(%{error: "Internal server error"}))
+
+              # Send error response safely
+              send_error_response(conn, 500, "Internal server error")
           end
 
         {:error, :unauthorized} ->
-          conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(403, Jason.encode!(%{error: "Unauthorized"}))
+          send_error_response(conn, 403, "Unauthorized")
 
         {:error, :invalid_body} ->
-          conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(400, Jason.encode!(%{error: "Invalid body"}))
+          send_error_response(conn, 400, "Invalid body")
 
         {:error, :malformed_request} ->
-          conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(422, Jason.encode!(%{error: "Malformed request"}))
+          send_error_response(conn, 422, "Malformed request")
       end
     end
   end
@@ -275,5 +270,31 @@ defmodule TopggEx.Webhook do
 
   defp default_error_handler(error) do
     Logger.error("TopggEx.Webhook error: #{inspect(error)}")
+  end
+
+  # Helper function to safely send JSON error responses
+  defp send_error_response(conn, status, error_message) do
+    if response_sent?(conn) do
+      conn
+    else
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(status, Jason.encode!(%{error: error_message}))
+    end
+  end
+
+  # Helper function to safely send a default response
+  defp send_default_response(conn) do
+    if response_sent?(conn) do
+      conn
+    else
+      send_resp(conn, 204, "")
+    end
+  end
+
+  # Helper function to check if response has been sent
+  # This works across different Plug versions
+  defp response_sent?(conn) do
+    conn.state in [:sent, :chunked]
   end
 end
